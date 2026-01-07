@@ -334,6 +334,17 @@ def sanitize_ofx(text: str) -> str:
         return f"<{prefix}{tag}{suffix}>"
 
     body = re.sub(r"<(/?)([A-Za-z0-9_.+-]+)([^>]*)>", _upper_tag, body)
+
+    # Fix SGML: Close leaf tags that have text content but no closing tag
+    # Matches <TAG>Content<... where Content is not whitespace and next char is < but not </TAG>
+    # Content must not contain <. \S matches < so we use [^<\s] to ensure we don't match start of next tag.
+    body = re.sub(
+        r"<([A-Z0-9_.+-]+)>([^<]*[^<\s][^<]*)(?=<(?!/\1>))",
+        r"<\1>\2</\1>",
+        body,
+        flags=re.IGNORECASE,
+    )
+
     body = unicodedata.normalize("NFKD", body).encode("ascii", "ignore").decode("ascii", "ignore")
     try:
         root = ET.fromstring(body)
@@ -358,12 +369,13 @@ def _read_text(path: Path) -> str:
 
 def sanitize_file(input_path: Path) -> str:
     text = _read_text(input_path)
-    suffix = input_path.suffix.lower()
-    if suffix == ".qif":
-        return sanitize_qif(text)
-    if suffix == ".ofx":
+    
+    # Detect OFX/QFX by content signature
+    if "<OFX" in text.upper():
         return sanitize_ofx(text)
-    raise ValueError(f"Unsupported file type '{input_path.suffix}' (expected .qif or .ofx)")
+        
+    # Default to QIF processing
+    return sanitize_qif(text)
 
 
 def _configure_logging(verbose: bool) -> None:
